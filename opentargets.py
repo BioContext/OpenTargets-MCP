@@ -1,5 +1,5 @@
 """
-FastMCP server that exposes selected Open Targets Platform GraphQL
+FastMCP server that exposes selected Open Targets Platform GraphQL
 end‑points as MCP tools.
 
 Save as  `opentargets_server.py`  (replacing the previous weather server).
@@ -28,7 +28,7 @@ async def make_ot_request(
     variables: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Perform a POST request to the Open Targets GraphQL API.
+    Perform a POST request to the Open Targets GraphQL API.
     Returns the parsed `data` block or None on any error.
     """
     payload: Dict[str, Any] = {"query": query}
@@ -47,9 +47,12 @@ async def make_ot_request(
             )
             response.raise_for_status()
             data = response.json()
-            # GraphQL returns 200 even when it embeds errors
-            return data.get("data") if "errors" not in data else None
-        except Exception:
+            if "errors" in data:
+                print(f"GraphQL errors: {data['errors']}")
+                return None
+            return data.get("data")
+        except Exception as e:
+            print(f"Request error: {str(e)}")
             return None
 
 
@@ -64,7 +67,7 @@ def _fmt_block(title: str, lines: List[str]) -> str:
 # ---------------------------------------------------------------------
 @mcp.tool()
 async def get_target_info(ensembl_id: str) -> str:
-    """Return basic Open Targets annotation for a target (gene/protein)."""
+    """Return basic Open Targets annotation for a target (gene/protein)."""
     query = """
     query targetInfo($id: String!) {
       target(ensemblId: $id) {
@@ -72,31 +75,39 @@ async def get_target_info(ensembl_id: str) -> str:
         approvedSymbol
         approvedName
         biotype
-        tractability { modality label value }
+        tractability {
+          modality
+          label
+          value
+        }
       }
     }
     """
     data = await make_ot_request(query, {"id": ensembl_id})
-    if not data or not data.get("target"):
+    if not data:
         return "Target not found or API error."
-
-    t = data["target"]
+    
+    target = data.get("target")
+    if not target:
+        return "Target not found in response."
+    
     lines = [
-        f"Symbol: {t['approvedSymbol']}",
-        f"Name: {t.get('approvedName', '—')}",
-        f"Biotype: {t.get('biotype', '—')}",
+        f"Symbol: {target.get('approvedSymbol', 'N/A')}",
+        f"Name: {target.get('approvedName', 'N/A')}",
+        f"Biotype: {target.get('biotype', 'N/A')}",
     ]
-    if tract := t.get("tractability"):
-        lines.append(
-            f"Tractability: {tract.get('label')} "
-            f"({tract.get('modality')} → {tract.get('value')})"
-        )
+    
+    tractability = target.get("tractability", [])
+    if tractability:
+        tract_info = tractability[0] if isinstance(tractability, list) else tractability
+        lines.append(f"Tractability: {tract_info.get('label', 'N/A')} ({tract_info.get('modality', 'N/A')} → {tract_info.get('value', 'N/A')})")
+    
     return _fmt_block(f"Target {ensembl_id}", lines)
 
 
 @mcp.tool()
 async def get_disease_info(efo_id: str) -> str:
-    """Return basic Open Targets annotation for a disease / phenotype."""
+    """Return basic Open Targets annotation for a disease / phenotype."""
     query = """
     query diseaseInfo($id: String!) {
       disease(efoId: $id) {
@@ -108,15 +119,19 @@ async def get_disease_info(efo_id: str) -> str:
     }
     """
     data = await make_ot_request(query, {"id": efo_id})
-    if not data or not data.get("disease"):
+    if not data:
         return "Disease not found or API error."
-
-    d = data["disease"]
+    
+    disease = data.get("disease")
+    if not disease:
+        return "Disease not found in response."
+    
     lines = [
-        f"Name: {d['name']}",
-        f"Ontology: {d.get('ontology', '—')}",
-        f"Therapeutic areas: {', '.join(d.get('therapeuticAreas', [])) or '—'}",
+        f"Name: {disease.get('name', 'N/A')}",
+        f"Ontology: {disease.get('ontology', 'N/A')}",
+        f"Therapeutic areas: {', '.join(disease.get('therapeuticAreas', [])) or 'N/A'}"
     ]
+    
     return _fmt_block(f"Disease {efo_id}", lines)
 
 
